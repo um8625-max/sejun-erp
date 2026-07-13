@@ -1,0 +1,1241 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+<meta charset="UTF-8">
+<title>세준 ERP</title>
+<style>
+  :root {
+    --bg: #f5f6f8;
+    --panel: #ffffff;
+    --border: #e2e5ea;
+    --text: #1f2430;
+    --muted: #6b7280;
+    --accent: #2f6f4f;
+    --accent-hover: #245a3f;
+    --danger: #b3423a;
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0;
+    font-family: -apple-system, "Apple SD Gothic Neo", "Malgun Gothic", sans-serif;
+    background: var(--bg);
+    color: var(--text);
+  }
+  header {
+    background: var(--panel);
+    border-bottom: 1px solid var(--border);
+    padding: 20px 32px;
+  }
+  header h1 { margin: 0; font-size: 20px; }
+  header p { margin: 4px 0 0; color: var(--muted); font-size: 13px; }
+  .status { font-size: 12px; margin-top: 6px; }
+  .status.ok { color: var(--accent); }
+  .status.fail { color: var(--danger); }
+
+  nav {
+    display: flex;
+    gap: 4px;
+    flex-wrap: wrap;
+    padding: 12px 32px 0;
+    background: var(--panel);
+    border-bottom: 1px solid var(--border);
+  }
+  nav button {
+    border: none;
+    background: transparent;
+    padding: 10px 16px;
+    font-size: 14px;
+    cursor: pointer;
+    color: var(--muted);
+    border-bottom: 2px solid transparent;
+  }
+  nav button.active {
+    color: var(--accent);
+    border-bottom-color: var(--accent);
+    font-weight: 600;
+  }
+
+  main { padding: 24px 32px 60px; max-width: 1100px; margin: 0 auto; }
+  .panel {
+    background: var(--panel);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    padding: 20px;
+    margin-bottom: 20px;
+  }
+  .panel h2 { margin: 0 0 14px; font-size: 15px; }
+
+  form.entry { display: flex; flex-wrap: wrap; gap: 10px; align-items: flex-end; }
+  .field { display: flex; flex-direction: column; gap: 4px; }
+  .field label { font-size: 12px; color: var(--muted); }
+  .field input, .field select {
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    padding: 8px 10px;
+    font-size: 13px;
+    width: 150px;
+  }
+  button.submit {
+    background: var(--accent);
+    color: white;
+    border: none;
+    border-radius: 6px;
+    padding: 9px 18px;
+    font-size: 13px;
+    cursor: pointer;
+  }
+  button.submit:hover { background: var(--accent-hover); }
+  button.cancel {
+    background: transparent;
+    color: var(--muted);
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    padding: 9px 18px;
+    font-size: 13px;
+    cursor: pointer;
+  }
+  .edit-banner {
+    width: 100%;
+    font-size: 12px;
+    color: var(--accent);
+    background: #eef6f1;
+    border: 1px solid #cfe8da;
+    border-radius: 6px;
+    padding: 8px 10px;
+    margin-bottom: 4px;
+  }
+
+  table { width: 100%; border-collapse: collapse; margin-top: 16px; font-size: 13px; }
+  th, td { text-align: left; padding: 9px 10px; border-bottom: 1px solid var(--border); }
+  th { color: var(--muted); font-weight: 600; font-size: 12px; }
+  tr:hover { background: #fafbfc; }
+  button.link-btn {
+    border: none; background: transparent; cursor: pointer; font-size: 12px;
+  }
+  button.edit-btn { color: var(--accent); }
+  button.del-btn { color: var(--danger); }
+  .empty { color: var(--muted); font-size: 13px; padding: 16px 0; }
+</style>
+</head>
+<body>
+
+<header>
+  <h1>세준 ERP</h1>
+  <p>기준정보(품목/거래처/공급사/창고), 영업(주문/반품/세금계산서), 수금, 출고 리포트를 관리합니다.</p>
+  <div id="apiStatus" class="status">API 연결 확인 중...</div>
+</header>
+
+<nav id="tabs">
+  <button data-tab="products" class="active">품목</button>
+  <button data-tab="customers">거래처</button>
+  <button data-tab="collections">수금</button>
+  <button data-tab="orders">주문</button>
+  <button data-tab="returns">반품</button>
+  <button data-tab="taxinvoices">세금계산서</button>
+  <button data-tab="reports">출고리포트</button>
+  <button data-tab="customersales">거래처별 판매내역</button>
+  <button data-tab="pricelists">가격표</button>
+  <button data-tab="purchases">매입</button>
+  <button data-tab="inventoryvalues">재고금액</button>
+</nav>
+
+<main>
+  <div class="panel">
+    <h2 id="formTitle">품목 등록</h2>
+    <form class="entry" id="entryForm"></form>
+  </div>
+  <div class="panel">
+    <h2 id="listTitle">품목 목록</h2>
+    <div id="listArea"><p class="empty">불러오는 중...</p></div>
+  </div>
+</main>
+
+<script>
+const API_BASE = window.location.origin;
+
+// 각 탭(엔티티)별 필드 정의. 폼과 테이블을 이 정의로부터 자동 생성한다.
+const ENTITIES = {
+  products: {
+    label: "품목", endpoint: "products",
+    fields: [
+      { key: "sku", label: "SKU", type: "text", required: true },
+      { key: "name", label: "품명", type: "text", required: true },
+      { key: "spec", label: "규격", type: "text" },
+      { key: "unit_type", label: "기본판매단위", type: "select", options: ["박스", "멀티팩", "낱개"], required: true },
+      { key: "units_per_multipack", label: "멀티팩당 개수", type: "number" },
+      { key: "units_per_box", label: "박스당 개수", type: "number" },
+      { key: "box_price", label: "박스납품가", type: "number" },
+      { key: "multi_price", label: "멀티납품가", type: "number" },
+      { key: "unit_price", label: "낱개납품가", type: "number" },
+      { key: "cost_price", label: "원가", type: "number" },
+      { key: "supply_price", label: "기준판가(마진계산용)", type: "number" },
+      { key: "margin_rate", label: "마진율(%)", type: "number", displayOnly: true, suffix: "%" },
+      { key: "stock_quantity", label: "현재고", type: "number" },
+    ]
+  },
+  customers: {
+    label: "거래처", endpoint: "customers",
+    fields: [
+      { key: "customer_code", label: "거래처코드", type: "text" },
+      { key: "name", label: "거래처명", type: "text", required: true },
+      { key: "biz_reg_no", label: "사업자번호", type: "text" },
+      { key: "contact_name", label: "담당자", type: "text" },
+      { key: "phone", label: "전화번호", type: "text" },
+      { key: "address", label: "주소", type: "text" },
+      { key: "price_group_id", label: "가격그룹", type: "select-async", source: "price-groups", displayKey: "price_group_name" },
+      { key: "outstanding_balance", label: "미수금(현재잔액)", type: "number" },
+    ]
+  },
+  collections: {
+    label: "수금", endpoint: "collections",
+    fields: [
+      { key: "customer_id", label: "거래처", type: "select-async", source: "customers", required: true, displayKey: "customer_name" },
+      { key: "amount", label: "수금액", type: "number", required: true },
+      { key: "collected_at", label: "수금일", type: "date", required: true },
+      { key: "method", label: "수금방법", type: "select", options: ["현금", "계좌이체", "카드", "어음"] },
+      { key: "memo", label: "메모", type: "text" },
+    ]
+  },
+  purchases: {
+    label: "매입", endpoint: "purchases",
+    fields: [
+      { key: "amount", label: "매입금액", type: "number", required: true },
+      { key: "purchased_at", label: "매입일", type: "date", required: true },
+      { key: "memo", label: "메모", type: "text" },
+    ]
+  },
+  inventoryvalues: {
+    label: "재고금액", endpoint: "inventory-values",
+    fields: [
+      { key: "month", label: "해당월", type: "month", required: true },
+      { key: "amount", label: "재고금액", type: "number", required: true },
+      { key: "memo", label: "메모", type: "text" },
+    ]
+  },
+};
+
+let currentTab = "products";
+let editingItem = null;  // 수정 중인 항목(없으면 신규 등록 모드)
+
+async function checkApi() {
+  const el = document.getElementById("apiStatus");
+  try {
+    const res = await fetch(`${API_BASE}/api/health`);
+    if (!res.ok) throw new Error();
+    el.textContent = "API 연결됨 (localhost:8000)";
+    el.className = "status ok";
+  } catch {
+    el.textContent = "API에 연결할 수 없습니다. 백엔드 서버가 실행 중인지 확인하세요.";
+    el.className = "status fail";
+  }
+}
+
+async function renderForm() {
+  const cfg = ENTITIES[currentTab];
+  document.getElementById("formTitle").textContent = editingItem ? `${cfg.label} 수정` : `${cfg.label} 등록`;
+  document.getElementById("listTitle").textContent = `${cfg.label} 목록`;
+  const form = document.getElementById("entryForm");
+  form.style.flexDirection = "";
+  form.style.alignItems = "";
+  form.innerHTML = "";
+
+  if (editingItem) {
+    const banner = document.createElement("div");
+    banner.className = "edit-banner";
+    banner.textContent = `#${editingItem.id} 항목을 수정하는 중입니다. 저장하면 기존 값을 덮어씁니다.`;
+    form.appendChild(banner);
+  }
+
+  for (const f of cfg.fields) {
+    if (f.displayOnly) continue; // 서버가 계산하는 값(마진율 등)은 입력칸을 만들지 않는다
+    const wrap = document.createElement("div");
+    wrap.className = "field";
+    const label = document.createElement("label");
+    label.textContent = f.label;
+    wrap.appendChild(label);
+
+    let input;
+    if (f.type === "select") {
+      input = document.createElement("select");
+      f.options.forEach(o => {
+        const opt = document.createElement("option");
+        opt.value = o; opt.textContent = o;
+        input.appendChild(opt);
+      });
+    } else if (f.type === "select-async") {
+      input = document.createElement("select");
+      if (!f.required) {
+        const defOpt = document.createElement("option");
+        defOpt.value = "";
+        defOpt.textContent = f.source === "price-groups" ? "기본(여수할인마트)" : "선택 안 함";
+        input.appendChild(defOpt);
+      }
+      try {
+        const res = await fetch(`${API_BASE}/${f.source}`);
+        const items = await res.json();
+        if (!items.length && f.required) {
+          input.innerHTML = `<option value="">등록된 항목이 없습니다</option>`;
+        } else {
+          items.forEach(item => {
+            const opt = document.createElement("option");
+            opt.value = item.id;
+            opt.textContent = item.name;
+            input.appendChild(opt);
+          });
+        }
+      } catch {
+        if (f.required) input.innerHTML = `<option value="">목록을 불러오지 못했습니다</option>`;
+      }
+    } else {
+      input = document.createElement("input");
+      input.type = f.type;
+    }
+    input.name = f.key;
+    if (f.required) input.required = true;
+    if (editingItem && editingItem[f.key] != null) {
+      input.value = editingItem[f.key];
+    }
+    wrap.appendChild(input);
+    form.appendChild(wrap);
+  }
+
+  if (currentTab === "customers") {
+    const uploadWrap = document.createElement("div");
+    uploadWrap.style.cssText = "display:flex; flex-wrap:wrap; gap:8px; align-items:center; width:100%; margin-top:10px; padding-top:12px; border-top:1px solid var(--border);";
+
+    const uploadLabel = document.createElement("span");
+    uploadLabel.textContent = "거래처목록 + 미수현황 엑셀 업로드(사업자번호/담당자/전화번호/주소/미수금 일괄 반영):";
+    uploadLabel.style.cssText = "font-size:12px; color:var(--muted); width:100%;";
+
+    const listFileWrap = document.createElement("div");
+    listFileWrap.style.cssText = "display:flex; flex-direction:column; gap:2px;";
+    listFileWrap.innerHTML = `<span style="font-size:11px; color:var(--muted);">거래처목록</span>`;
+    const listFileInput = document.createElement("input");
+    listFileInput.type = "file";
+    listFileInput.accept = ".xlsx,.xls";
+    listFileWrap.appendChild(listFileInput);
+
+    const recvFileWrap = document.createElement("div");
+    recvFileWrap.style.cssText = "display:flex; flex-direction:column; gap:2px;";
+    recvFileWrap.innerHTML = `<span style="font-size:11px; color:var(--muted);">거래처미수현황</span>`;
+    const recvFileInput = document.createElement("input");
+    recvFileInput.type = "file";
+    recvFileInput.accept = ".xlsx,.xls";
+    recvFileWrap.appendChild(recvFileInput);
+
+    const uploadBtn = document.createElement("button");
+    uploadBtn.type = "button";
+    uploadBtn.className = "submit";
+    uploadBtn.textContent = "업로드";
+    uploadBtn.onclick = async () => {
+      if (!listFileInput.files.length || !recvFileInput.files.length) {
+        alert("거래처목록과 거래처미수현황 파일을 모두 선택하세요.");
+        return;
+      }
+      const fd = new FormData();
+      fd.append("customer_list_file", listFileInput.files[0]);
+      fd.append("receivables_file", recvFileInput.files[0]);
+      const res = await fetch(`${API_BASE}/admin/import-customer-full`, { method: "POST", body: fd });
+      const data = await res.json().catch(() => ({}));
+      alert(
+        `신규등록 ${data["거래처_신규등록"] ?? "-"}건 · 정보갱신 ${data["거래처_정보갱신"] ?? "-"}건 · ` +
+        `중복병합 ${data["중복병합"] ?? "-"}건 · 미수금반영 ${data["미수금_반영건수"] ?? "-"}건`
+      );
+      loadList();
+    };
+
+    uploadWrap.append(uploadLabel, listFileWrap, recvFileWrap, uploadBtn);
+    form.appendChild(uploadWrap);
+  }
+
+
+  const btnRow = document.createElement("div");
+  btnRow.style.cssText = "display:flex; gap:8px;";
+  const submitBtn = document.createElement("button");
+  submitBtn.type = "submit";
+  submitBtn.className = "submit";
+  submitBtn.textContent = editingItem ? "수정 저장" : "등록";
+  btnRow.appendChild(submitBtn);
+
+  if (editingItem) {
+    const cancelBtn = document.createElement("button");
+    cancelBtn.type = "button";
+    cancelBtn.className = "cancel";
+    cancelBtn.textContent = "취소";
+    cancelBtn.onclick = () => { editingItem = null; renderForm(); };
+    btnRow.appendChild(cancelBtn);
+  }
+  form.appendChild(btnRow);
+}
+
+async function loadList() {
+  const cfg = ENTITIES[currentTab];
+  const listArea = document.getElementById("listArea");
+  listArea.innerHTML = "<p class='empty'>불러오는 중...</p>";
+  try {
+    const res = await fetch(`${API_BASE}/${cfg.endpoint}`);
+    const items = await res.json();
+    if (!items.length) {
+      listArea.innerHTML = "<p class='empty'>등록된 항목이 없습니다.</p>";
+      return;
+    }
+    const table = document.createElement("table");
+    const thead = document.createElement("tr");
+    cfg.fields.forEach(f => {
+      const th = document.createElement("th");
+      th.textContent = f.label;
+      thead.appendChild(th);
+    });
+    thead.appendChild(document.createElement("th"));
+    table.appendChild(thead);
+
+    items.forEach(item => {
+      const tr = document.createElement("tr");
+      cfg.fields.forEach(f => {
+        const td = document.createElement("td");
+        const val = f.displayKey ? item[f.displayKey] : item[f.key];
+        td.textContent = (val ?? "-") + (val != null && f.suffix ? f.suffix : "");
+        tr.appendChild(td);
+      });
+      const tdBtn = document.createElement("td");
+      tdBtn.style.whiteSpace = "nowrap";
+
+      const editBtn = document.createElement("button");
+      editBtn.className = "link-btn edit-btn";
+      editBtn.textContent = "수정";
+      editBtn.onclick = () => {
+        editingItem = item;
+        renderForm();
+        document.getElementById("entryForm").scrollIntoView({ behavior: "smooth", block: "start" });
+      };
+      tdBtn.appendChild(editBtn);
+
+      const delBtn = document.createElement("button");
+      delBtn.className = "link-btn del-btn";
+      delBtn.textContent = "삭제";
+      delBtn.onclick = async () => {
+        if (!confirm("삭제하시겠습니까?")) return;
+        await fetch(`${API_BASE}/${cfg.endpoint}/${item.id}`, { method: "DELETE" });
+        loadList();
+      };
+      tdBtn.appendChild(delBtn);
+
+      tr.appendChild(tdBtn);
+      table.appendChild(tr);
+    });
+    listArea.innerHTML = "";
+    listArea.appendChild(table);
+  } catch (e) {
+    listArea.innerHTML = "<p class='empty'>목록을 불러오지 못했습니다.</p>";
+  }
+}
+
+document.getElementById("entryForm").addEventListener("submit", async (e) => {
+  e.preventDefault();
+  if (CUSTOM_TABS[currentTab]) return; // 주문/반품/세금계산서/리포트는 자체 버튼으로 처리한다
+  const cfg = ENTITIES[currentTab];
+  const form = e.target;
+  const payload = {};
+  cfg.fields.forEach(f => {
+    if (f.displayOnly) return;
+    const val = form[f.key].value;
+    if (f.type === "number" || f.type === "select-async") {
+      payload[f.key] = val === "" ? null : Number(val);
+    } else {
+      payload[f.key] = val === "" ? null : val;
+    }
+  });
+
+  if (editingItem) {
+    await fetch(`${API_BASE}/${cfg.endpoint}/${editingItem.id}`, {
+      method: "PUT",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(payload),
+    });
+    editingItem = null;
+  } else {
+    await fetch(`${API_BASE}/${cfg.endpoint}`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(payload),
+    });
+  }
+  renderForm();
+  loadList();
+});
+
+// ---------------------------------------------------------------------------
+// 주문 / 반품 / 세금계산서 / 출고리포트는 항목 배열이나 집계가 필요해
+// 품목/거래처처럼 단순 필드 나열로 처리할 수 없다. 그래서 별도 함수로 작성한다.
+// ---------------------------------------------------------------------------
+async function renderOrderTab() {
+  document.getElementById("formTitle").textContent = "주문 등록";
+  document.getElementById("listTitle").textContent = "주문 목록";
+  const form = document.getElementById("entryForm");
+  form.style.flexDirection = "column";
+  form.style.alignItems = "stretch";
+  form.innerHTML = "";
+
+  const [customers, products] = await Promise.all([
+    fetch(`${API_BASE}/customers`).then(r => r.json()),
+    fetch(`${API_BASE}/products`).then(r => r.json()),
+  ]);
+  const productMap = Object.fromEntries(products.map(p => [p.id, p]));
+  const customerMap = Object.fromEntries(customers.map(c => [c.id, c]));
+
+  const groupPriceCache = {};  // price_group_id -> { productId: {박스,멀티팩,낱개} }
+  let priceSource = null;      // null이면 품목 자체의 기본(여수할인마트)가를 쓴다
+
+  async function resolvePriceSource(customerId) {
+    const cust = customerMap[customerId];
+    if (!cust || !cust.price_group_id) return null;
+    if (!groupPriceCache[cust.price_group_id]) {
+      const rows = await fetch(`${API_BASE}/product-prices?price_group_id=${cust.price_group_id}`).then(r => r.json());
+      const map = {};
+      rows.forEach(r => { map[r.product_id] = { "박스": r.box_price, "멀티팩": r.multi_price, "낱개": r.unit_price }; });
+      groupPriceCache[cust.price_group_id] = map;
+    }
+    return groupPriceCache[cust.price_group_id];
+  }
+
+  function getUnitPrice(productId, unitType) {
+    const prod = productMap[productId];
+    if (!prod) return 0;
+    if (priceSource && priceSource[productId]) {
+      return Number(priceSource[productId][unitType] ?? 0);
+    }
+    const fieldMap = { "박스": "box_price", "멀티팩": "multi_price", "낱개": "unit_price" };
+    return Number(prod[fieldMap[unitType]] ?? 0);
+  }
+
+  const topRow = document.createElement("div");
+  topRow.style.cssText = "display:flex; gap:10px; flex-wrap:wrap;";
+
+  const custField = document.createElement("div");
+  custField.className = "field";
+  custField.innerHTML = "<label>거래처</label>";
+  const custSelect = document.createElement("select");
+  custSelect.innerHTML = customers.length
+    ? customers.map(c => `<option value="${c.id}">${c.name}${c.price_group_id ? " · " + c.price_group_name : ""}</option>`).join("")
+    : `<option value="">등록된 거래처 없음</option>`;
+  custField.appendChild(custSelect);
+
+  const dateField = document.createElement("div");
+  dateField.className = "field";
+  dateField.innerHTML = "<label>주문일</label>";
+  const dateInput = document.createElement("input");
+  dateInput.type = "date";
+  dateInput.value = new Date().toISOString().slice(0, 10);
+  dateField.appendChild(dateInput);
+
+  topRow.appendChild(custField);
+  topRow.appendChild(dateField);
+  form.appendChild(topRow);
+
+  const itemsWrap = document.createElement("div");
+  itemsWrap.style.marginTop = "14px";
+  form.appendChild(itemsWrap);
+
+  const totalPreview = document.createElement("div");
+  totalPreview.style.cssText = "margin-top:10px; font-size:13px; color:var(--muted);";
+
+  function updateOrderTotal() {
+    let supply = 0;
+    itemsWrap.querySelectorAll(".order-item-row").forEach(row => {
+      const productId = Number(row.querySelector(".order-item-product").value);
+      const unitType = row.querySelector(".order-item-unit").value;
+      const qty = Number(row.querySelector(".order-item-qty").value || 0);
+      supply += getUnitPrice(productId, unitType) * qty;
+    });
+    const vat = Math.round(supply * 0.1);
+    totalPreview.textContent = `공급가액 ${supply.toLocaleString()}원 · 부가세 ${vat.toLocaleString()}원 · 합계 ${(supply + vat).toLocaleString()}원`;
+  }
+
+  function addItemRow() {
+    const row = document.createElement("div");
+    row.className = "order-item-row";
+    row.style.cssText = "display:flex; gap:8px; align-items:center; margin-bottom:8px;";
+
+    const prodSelect = document.createElement("select");
+    prodSelect.className = "order-item-product";
+    prodSelect.innerHTML = products.length
+      ? products.map(p => `<option value="${p.id}">${p.name}</option>`).join("")
+      : `<option value="">등록된 품목 없음</option>`;
+
+    const unitSelect = document.createElement("select");
+    unitSelect.className = "order-item-unit";
+    unitSelect.innerHTML = ["박스", "멀티팩", "낱개"].map(u => `<option value="${u}">${u}</option>`).join("");
+    unitSelect.value = "멀티팩";
+
+    const qtyInput = document.createElement("input");
+    qtyInput.type = "number"; qtyInput.min = "1"; qtyInput.value = "1";
+    qtyInput.className = "order-item-qty";
+    qtyInput.style.width = "70px";
+
+    const lineTotal = document.createElement("span");
+    lineTotal.style.cssText = "width:110px; font-size:13px; color:var(--muted);";
+
+    const removeBtn = document.createElement("button");
+    removeBtn.type = "button";
+    removeBtn.textContent = "삭제";
+    removeBtn.className = "link-btn del-btn";
+    removeBtn.onclick = () => { row.remove(); updateOrderTotal(); };
+
+    function updateLine() {
+      const productId = Number(prodSelect.value);
+      const price = getUnitPrice(productId, unitSelect.value);
+      lineTotal.textContent = (price * Number(qtyInput.value || 0)).toLocaleString() + "원" + (price === 0 ? " (판매불가)" : "");
+      updateOrderTotal();
+    }
+    prodSelect.addEventListener("change", updateLine);
+    unitSelect.addEventListener("change", updateLine);
+    qtyInput.addEventListener("input", updateLine);
+    row._updateLine = updateLine;
+
+    row.append(prodSelect, unitSelect, qtyInput, lineTotal, removeBtn);
+    itemsWrap.appendChild(row);
+    updateLine();
+  }
+
+  custSelect.addEventListener("change", async () => {
+    priceSource = await resolvePriceSource(Number(custSelect.value));
+    itemsWrap.querySelectorAll(".order-item-row").forEach(row => row._updateLine());
+  });
+
+  const addRowBtn = document.createElement("button");
+  addRowBtn.type = "button";
+  addRowBtn.textContent = "+ 품목 추가";
+  addRowBtn.className = "submit";
+  addRowBtn.style.cssText = "background:transparent; color:var(--accent); border:1px solid var(--accent);";
+  addRowBtn.onclick = addItemRow;
+  form.appendChild(addRowBtn);
+  form.appendChild(totalPreview);
+
+  const submitBtn = document.createElement("button");
+  submitBtn.type = "button";
+  submitBtn.className = "submit";
+  submitBtn.textContent = "주문 등록";
+  submitBtn.style.marginTop = "10px";
+  submitBtn.onclick = async () => {
+    const customerId = Number(custSelect.value);
+    if (!customerId) { alert("거래처를 선택하세요."); return; }
+    const items = [];
+    itemsWrap.querySelectorAll(".order-item-row").forEach(row => {
+      const productId = Number(row.querySelector(".order-item-product").value);
+      const unitType = row.querySelector(".order-item-unit").value;
+      const qty = Number(row.querySelector(".order-item-qty").value);
+      if (productId && qty > 0) items.push({ product_id: productId, unit_type: unitType, quantity: qty });
+    });
+    if (!items.length) { alert("품목을 1개 이상 추가하세요."); return; }
+    const res = await fetch(`${API_BASE}/sales-orders`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ customer_id: customerId, order_date: dateInput.value, items }),
+    });
+    if (!res.ok) {
+      const err = await res.json().catch(() => ({}));
+      alert("주문 등록에 실패했습니다: " + (err.detail || res.status));
+      return;
+    }
+    renderOrderTab();
+  };
+  form.appendChild(submitBtn);
+
+  if (customers.length) {
+    priceSource = await resolvePriceSource(Number(custSelect.value));
+  }
+  addItemRow();
+  loadOrderList();
+}
+
+async function loadOrderList() {
+  const listArea = document.getElementById("listArea");
+  listArea.innerHTML = "<p class='empty'>불러오는 중...</p>";
+  try {
+    const orders = await fetch(`${API_BASE}/sales-orders`).then(r => r.json());
+    if (!orders.length) {
+      listArea.innerHTML = "<p class='empty'>등록된 주문이 없습니다.</p>";
+      return;
+    }
+    const table = document.createElement("table");
+    table.innerHTML = "<tr><th>주문번호</th><th>주문일</th><th>거래처</th><th>상태</th><th>공급가액</th><th>부가세</th><th>합계</th><th></th></tr>";
+    orders.forEach(o => {
+      const tr = document.createElement("tr");
+      tr.innerHTML = `
+        <td>#${o.id}</td>
+        <td>${o.order_date}</td>
+        <td>${o.customer_name ?? "-"}</td>
+        <td>${o.status}</td>
+        <td>${o.supply_amount.toLocaleString()}원</td>
+        <td>${o.vat_amount.toLocaleString()}원</td>
+        <td>${o.total_amount.toLocaleString()}원</td>`;
+      const tdAction = document.createElement("td");
+      if (o.status === "주문접수") {
+        const shipBtn = document.createElement("button");
+        shipBtn.className = "submit";
+        shipBtn.textContent = "출고처리";
+        shipBtn.style.cssText = "padding:5px 10px; font-size:12px;";
+        shipBtn.onclick = async () => {
+          await fetch(`${API_BASE}/sales-orders/${o.id}/ship`, { method: "PATCH" });
+          loadOrderList();
+        };
+        tdAction.appendChild(shipBtn);
+      }
+      tr.appendChild(tdAction);
+      table.appendChild(tr);
+    });
+    listArea.innerHTML = "";
+    listArea.appendChild(table);
+  } catch {
+    listArea.innerHTML = "<p class='empty'>목록을 불러오지 못했습니다.</p>";
+  }
+}
+
+async function renderReturnTab() {
+  document.getElementById("formTitle").textContent = "반품 등록";
+  document.getElementById("listTitle").textContent = "반품 목록";
+  const form = document.getElementById("entryForm");
+  form.style.flexDirection = "";
+  form.style.alignItems = "";
+  form.innerHTML = "";
+
+  const orders = await fetch(`${API_BASE}/sales-orders`).then(r => r.json());
+
+  const orderField = document.createElement("div");
+  orderField.className = "field";
+  orderField.innerHTML = "<label>주문</label>";
+  const orderSelect = document.createElement("select");
+  orderSelect.style.width = "280px";
+  orderSelect.innerHTML = orders.length
+    ? orders.map(o => `<option value="${o.id}">${o.label}</option>`).join("")
+    : `<option value="">등록된 주문 없음</option>`;
+  orderField.appendChild(orderSelect);
+
+  const itemField = document.createElement("div");
+  itemField.className = "field";
+  itemField.innerHTML = "<label>반품 품목</label>";
+  const itemSelect = document.createElement("select");
+  itemSelect.style.width = "220px";
+  itemField.appendChild(itemSelect);
+
+  function populateItems() {
+    const order = orders.find(o => o.id === Number(orderSelect.value));
+    if (!order) { itemSelect.innerHTML = ""; return; }
+    const options = order.items.map(it => {
+      const remaining = it.quantity - it.returned_quantity;
+      return `<option value="${it.id}" ${remaining <= 0 ? "disabled" : ""}>${it.product_name} (남은 ${remaining}개)</option>`;
+    });
+    itemSelect.innerHTML = options.join("") || `<option value="">반품 가능 항목 없음</option>`;
+  }
+  orderSelect.addEventListener("change", populateItems);
+  populateItems();
+
+  const qtyField = document.createElement("div");
+  qtyField.className = "field";
+  qtyField.innerHTML = "<label>반품 수량</label>";
+  const qtyInput = document.createElement("input");
+  qtyInput.type = "number"; qtyInput.min = "1"; qtyInput.value = "1";
+  qtyField.appendChild(qtyInput);
+
+  const reasonField = document.createElement("div");
+  reasonField.className = "field";
+  reasonField.innerHTML = "<label>사유</label>";
+  const reasonInput = document.createElement("input");
+  reasonInput.type = "text";
+  reasonField.appendChild(reasonInput);
+
+  const dateField = document.createElement("div");
+  dateField.className = "field";
+  dateField.innerHTML = "<label>반품일</label>";
+  const dateInput = document.createElement("input");
+  dateInput.type = "date";
+  dateInput.value = new Date().toISOString().slice(0, 10);
+  dateField.appendChild(dateInput);
+
+  [orderField, itemField, qtyField, reasonField, dateField].forEach(f => form.appendChild(f));
+
+  const submitBtn = document.createElement("button");
+  submitBtn.type = "button";
+  submitBtn.className = "submit";
+  submitBtn.textContent = "반품 등록";
+  submitBtn.onclick = async () => {
+    const orderItemId = Number(itemSelect.value);
+    if (!orderItemId) { alert("반품할 품목을 선택하세요."); return; }
+    const res = await fetch(`${API_BASE}/returns`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        order_item_id: orderItemId,
+        quantity: Number(qtyInput.value),
+        reason: reasonInput.value || null,
+        returned_at: dateInput.value,
+      }),
+    });
+    if (!res.ok) {
+      const err = await res.json().catch(() => ({}));
+      alert("반품 등록에 실패했습니다: " + (err.detail || res.status));
+      return;
+    }
+    renderReturnTab();
+  };
+  form.appendChild(submitBtn);
+
+  loadReturnList();
+}
+
+async function loadReturnList() {
+  const listArea = document.getElementById("listArea");
+  listArea.innerHTML = "<p class='empty'>불러오는 중...</p>";
+  try {
+    const returns = await fetch(`${API_BASE}/returns`).then(r => r.json());
+    if (!returns.length) {
+      listArea.innerHTML = "<p class='empty'>등록된 반품이 없습니다.</p>";
+      return;
+    }
+    const table = document.createElement("table");
+    table.innerHTML = "<tr><th>반품일</th><th>거래처</th><th>품목</th><th>수량</th><th>환불액</th><th>사유</th></tr>";
+    returns.forEach(r => {
+      const tr = document.createElement("tr");
+      tr.innerHTML = `
+        <td>${r.returned_at}</td>
+        <td>${r.customer_name ?? "-"}</td>
+        <td>${r.product_name ?? "-"}</td>
+        <td>${r.quantity}</td>
+        <td>${r.refund_amount.toLocaleString()}원</td>
+        <td>${r.reason ?? "-"}</td>`;
+      table.appendChild(tr);
+    });
+    listArea.innerHTML = "";
+    listArea.appendChild(table);
+  } catch {
+    listArea.innerHTML = "<p class='empty'>목록을 불러오지 못했습니다.</p>";
+  }
+}
+
+async function renderInvoiceTab() {
+  document.getElementById("formTitle").textContent = "세금계산서 발행";
+  document.getElementById("listTitle").textContent = "세금계산서 목록";
+  const form = document.getElementById("entryForm");
+  form.style.flexDirection = "";
+  form.style.alignItems = "";
+  form.innerHTML = "";
+
+  const [orders, invoices] = await Promise.all([
+    fetch(`${API_BASE}/sales-orders`).then(r => r.json()),
+    fetch(`${API_BASE}/tax-invoices`).then(r => r.json()),
+  ]);
+  const invoicedOrderIds = new Set(invoices.map(i => i.order_id));
+  const available = orders.filter(o => !invoicedOrderIds.has(o.id));
+
+  const orderField = document.createElement("div");
+  orderField.className = "field";
+  orderField.innerHTML = "<label>주문</label>";
+  const orderSelect = document.createElement("select");
+  orderSelect.style.width = "280px";
+  orderSelect.innerHTML = available.length
+    ? available.map(o => `<option value="${o.id}">${o.label}</option>`).join("")
+    : `<option value="">발행 가능한 주문 없음</option>`;
+  orderField.appendChild(orderSelect);
+
+  const noField = document.createElement("div");
+  noField.className = "field";
+  noField.innerHTML = "<label>계산서 번호</label>";
+  const noInput = document.createElement("input");
+  noInput.type = "text";
+  noInput.placeholder = "예: INV-2026-0001";
+  noField.appendChild(noInput);
+
+  const dateField = document.createElement("div");
+  dateField.className = "field";
+  dateField.innerHTML = "<label>발행일</label>";
+  const dateInput = document.createElement("input");
+  dateInput.type = "date";
+  dateInput.value = new Date().toISOString().slice(0, 10);
+  dateField.appendChild(dateInput);
+
+  [orderField, noField, dateField].forEach(f => form.appendChild(f));
+
+  const submitBtn = document.createElement("button");
+  submitBtn.type = "button";
+  submitBtn.className = "submit";
+  submitBtn.textContent = "발행";
+  submitBtn.onclick = async () => {
+    const orderId = Number(orderSelect.value);
+    if (!orderId) { alert("주문을 선택하세요."); return; }
+    if (!noInput.value.trim()) { alert("계산서 번호를 입력하세요."); return; }
+    const res = await fetch(`${API_BASE}/tax-invoices`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ order_id: orderId, invoice_no: noInput.value.trim(), issue_date: dateInput.value }),
+    });
+    if (!res.ok) {
+      const err = await res.json().catch(() => ({}));
+      alert("발행에 실패했습니다: " + (err.detail || res.status));
+      return;
+    }
+    renderInvoiceTab();
+  };
+  form.appendChild(submitBtn);
+
+  const listArea = document.getElementById("listArea");
+  if (!invoices.length) {
+    listArea.innerHTML = "<p class='empty'>발행된 세금계산서가 없습니다.</p>";
+    return;
+  }
+  const table = document.createElement("table");
+  table.innerHTML = "<tr><th>계산서번호</th><th>발행일</th><th>거래처</th><th>공급가액</th><th>부가세</th><th>합계</th></tr>";
+  invoices.forEach(i => {
+    const tr = document.createElement("tr");
+    tr.innerHTML = `
+      <td>${i.invoice_no}</td>
+      <td>${i.issue_date}</td>
+      <td>${i.customer_name ?? "-"}</td>
+      <td>${i.supply_amount.toLocaleString()}원</td>
+      <td>${i.vat_amount.toLocaleString()}원</td>
+      <td>${i.total_amount.toLocaleString()}원</td>`;
+    table.appendChild(tr);
+  });
+  listArea.innerHTML = "";
+  listArea.appendChild(table);
+}
+
+async function renderReportTab() {
+  document.getElementById("formTitle").textContent = "출고 리포트 조회";
+  document.getElementById("listTitle").textContent = "조회 결과";
+  const form = document.getElementById("entryForm");
+  form.style.flexDirection = "";
+  form.style.alignItems = "";
+  form.innerHTML = "";
+
+  const dailyField = document.createElement("div");
+  dailyField.className = "field";
+  dailyField.innerHTML = "<label>일별 조회</label>";
+  const dailyInput = document.createElement("input");
+  dailyInput.type = "date";
+  dailyInput.value = new Date().toISOString().slice(0, 10);
+  dailyField.appendChild(dailyInput);
+
+  const dailyBtn = document.createElement("button");
+  dailyBtn.type = "button";
+  dailyBtn.className = "submit";
+  dailyBtn.textContent = "일별 조회";
+  dailyBtn.onclick = () => loadDailyReport(dailyInput.value);
+
+  const monthField = document.createElement("div");
+  monthField.className = "field";
+  monthField.innerHTML = "<label>월별 조회</label>";
+  const monthInput = document.createElement("input");
+  monthInput.type = "month";
+  const now = new Date();
+  monthInput.value = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, "0")}`;
+  monthField.appendChild(monthInput);
+
+  const monthBtn = document.createElement("button");
+  monthBtn.type = "button";
+  monthBtn.className = "submit";
+  monthBtn.textContent = "월별 조회";
+  monthBtn.onclick = () => loadMonthlyReport(monthInput.value);
+
+  form.append(dailyField, dailyBtn, monthField, monthBtn);
+
+  const listArea = document.getElementById("listArea");
+  listArea.innerHTML = '<div id="dailyReportBox" class="panel" style="margin-bottom:12px;"></div><div id="monthlyReportBox" class="panel"></div>';
+
+  loadDailyReport(dailyInput.value);
+  loadMonthlyReport(monthInput.value);
+}
+
+function renderReportBox(containerId, title, data) {
+  const box = document.getElementById(containerId);
+  if (!data) {
+    box.innerHTML = `<p class="empty">${title} 데이터를 불러오지 못했습니다.</p>`;
+    return;
+  }
+  box.innerHTML = `
+    <h2 style="margin:0 0 10px; font-size:14px;">${title} (${data.period})</h2>
+    <p style="font-size:13px; margin:4px 0;">출고 건수: ${data.order_count}건</p>
+    <p style="font-size:13px; margin:4px 0;">공급가액: ${data.supply_amount.toLocaleString()}원</p>
+    <p style="font-size:13px; margin:4px 0;">원가: ${data.cost_amount.toLocaleString()}원</p>
+    <p style="font-size:13px; margin:4px 0;">마진액: ${data.margin_amount.toLocaleString()}원</p>
+    <p style="font-size:13px; margin:4px 0; font-weight:600; color:var(--accent);">마진율: ${data.margin_rate ?? "-"}%</p>
+    <p style="font-size:11px; margin:8px 0 0; color:var(--muted);">※ 이 리포트는 아직 반품을 차감하지 않은 총 출고 기준입니다.</p>
+  `;
+}
+
+async function loadDailyReport(dateStr) {
+  try {
+    const res = await fetch(`${API_BASE}/reports/shipments/daily?target_date=${dateStr}`);
+    const data = await res.json();
+    renderReportBox("dailyReportBox", "일별 출고", data);
+  } catch {
+    renderReportBox("dailyReportBox", "일별 출고", null);
+  }
+}
+
+async function loadMonthlyReport(monthStr) {
+  try {
+    const [y, m] = monthStr.split("-");
+    const res = await fetch(`${API_BASE}/reports/shipments/monthly?year=${y}&month=${Number(m)}`);
+    const data = await res.json();
+    renderReportBox("monthlyReportBox", "월별 출고", data);
+  } catch {
+    renderReportBox("monthlyReportBox", "월별 출고", null);
+  }
+}
+
+async function renderPriceListTab() {
+  document.getElementById("formTitle").textContent = "가격표 업로드";
+  document.getElementById("listTitle").textContent = "등록된 가격그룹";
+  const form = document.getElementById("entryForm");
+  form.style.flexDirection = "column";
+  form.style.alignItems = "stretch";
+  form.innerHTML = "";
+
+  function buildUploadRow(label, hint, onUpload) {
+    const wrap = document.createElement("div");
+    wrap.style.cssText = "display:flex; gap:10px; align-items:center; padding:12px 0; border-bottom:1px solid var(--border);";
+    const info = document.createElement("div");
+    info.style.cssText = "min-width:220px;";
+    info.innerHTML = `<div style="font-size:13px; font-weight:600;">${label}</div><div style="font-size:11px; color:var(--muted);">${hint}</div>`;
+    const fileInput = document.createElement("input");
+    fileInput.type = "file";
+    fileInput.accept = ".xlsx,.xls";
+    const btn = document.createElement("button");
+    btn.type = "button";
+    btn.className = "submit";
+    btn.textContent = "업로드";
+    btn.onclick = async () => {
+      if (!fileInput.files.length) { alert("파일을 선택하세요."); return; }
+      await onUpload(fileInput.files[0]);
+      loadPriceGroupList();
+    };
+    wrap.append(info, fileInput, btn);
+    return wrap;
+  }
+
+  form.appendChild(buildUploadRow(
+    "기본(여수할인마트) 가격표",
+    "가격그룹을 지정하지 않은 모든 거래처에 자동 적용됩니다.",
+    async (file) => {
+      const fd = new FormData();
+      fd.append("file", file);
+      const res = await fetch(`${API_BASE}/admin/import-initial-catalog`, { method: "POST", body: fd });
+      const data = await res.json().catch(() => ({}));
+      alert(`업데이트건수: ${data["업데이트건수"] ?? "확인불가"}`);
+    }
+  ));
+
+  form.appendChild(buildUploadRow(
+    "여천식자재 가격표",
+    "(유)여천식자재 거래처에만 적용됩니다.",
+    async (file) => {
+      const fd = new FormData();
+      fd.append("file", file);
+      fd.append("group_name", "여천식자재");
+      fd.append("apply_to_customers", "(유)여천식자재");
+      const res = await fetch(`${API_BASE}/admin/import-group-price`, { method: "POST", body: fd });
+      const data = await res.json().catch(() => ({}));
+      alert(`가격등록건수: ${data["가격등록건수"] ?? "확인불가"} / 배정된거래처수: ${data["배정된거래처수"] ?? "-"}`);
+    }
+  ));
+
+  form.appendChild(buildUploadRow(
+    "푸드원(웅천식자재 공통) 가격표",
+    "주식회사푸드원, 여수웅천식자재 주식회사, 웅천식자재도매센터(주), 유한회사 푸드뱅크 네 거래처에 함께 적용됩니다.",
+    async (file) => {
+      const fd = new FormData();
+      fd.append("file", file);
+      fd.append("group_name", "푸드원(웅천식자재 공통)");
+      fd.append("apply_to_customers", "주식회사푸드원,여수웅천식자재 주식회사,웅천식자재도매센터(주),유한회사 푸드뱅크");
+      const res = await fetch(`${API_BASE}/admin/import-group-price`, { method: "POST", body: fd });
+      const data = await res.json().catch(() => ({}));
+      alert(`가격등록건수: ${data["가격등록건수"] ?? "확인불가"} / 배정된거래처수: ${data["배정된거래처수"] ?? "-"}`);
+    }
+  ));
+
+  // 가격표 파일을 다시 올리지 않고, 이미 있는 가격그룹에 거래처만 즉시 재배정하고 싶을 때 쓴다.
+  const quickAssignTitle = document.createElement("div");
+  quickAssignTitle.style.cssText = "font-size:13px; font-weight:600; margin-top:16px; padding-top:12px; border-top:1px solid var(--border);";
+  quickAssignTitle.textContent = "가격표 없이 거래처만 그룹에 즉시 배정";
+  form.appendChild(quickAssignTitle);
+
+  function buildAssignRow(defaultGroup, defaultNames) {
+    const wrap = document.createElement("div");
+    wrap.style.cssText = "display:flex; gap:8px; align-items:center; padding:10px 0; flex-wrap:wrap;";
+    const groupInput = document.createElement("input");
+    groupInput.type = "text";
+    groupInput.value = defaultGroup;
+    groupInput.style.width = "220px";
+    const namesInput = document.createElement("input");
+    namesInput.type = "text";
+    namesInput.value = defaultNames;
+    namesInput.style.width = "420px";
+    const btn = document.createElement("button");
+    btn.type = "button";
+    btn.className = "submit";
+    btn.textContent = "배정";
+    btn.onclick = async () => {
+      const fd = new FormData();
+      fd.append("group_name", groupInput.value.trim());
+      fd.append("customer_names", namesInput.value.trim());
+      const res = await fetch(`${API_BASE}/admin/assign-price-group`, { method: "POST", body: fd });
+      const data = await res.json().catch(() => ({}));
+      const notFound = data["찾지못함"] || [];
+      let msg = `배정됨: ${(data["배정됨"] || []).join(", ") || "없음"}`;
+      if (notFound.length) msg += `\n찾지 못한 거래처(이름을 다시 확인하세요): ${notFound.join(", ")}`;
+      alert(msg);
+      loadPriceGroupList();
+    };
+    wrap.append(groupInput, namesInput, btn);
+    return wrap;
+  }
+
+  form.appendChild(buildAssignRow(
+    "푸드원(웅천식자재 공통)",
+    "주식회사푸드원,여수웅천식자재 주식회사,웅천식자재도매센터(주),유한회사 푸드뱅크"
+  ));
+  form.appendChild(buildAssignRow(
+    "여천식자재",
+    "(유)여천식자재"
+  ));
+
+  loadPriceGroupList();
+}
+
+async function loadPriceGroupList() {
+  const listArea = document.getElementById("listArea");
+  listArea.innerHTML = "<p class='empty'>불러오는 중...</p>";
+  try {
+    const [groups, customers] = await Promise.all([
+      fetch(`${API_BASE}/price-groups`).then(r => r.json()),
+      fetch(`${API_BASE}/customers`).then(r => r.json()),
+    ]);
+    const table = document.createElement("table");
+    table.innerHTML = "<tr><th>가격그룹</th><th>적용 거래처</th></tr>";
+    const baseRow = document.createElement("tr");
+    const baseCustomers = customers.filter(c => !c.price_group_id).map(c => c.name).join(", ") || "-";
+    baseRow.innerHTML = `<td>기본(여수할인마트)</td><td>${baseCustomers}</td>`;
+    table.appendChild(baseRow);
+    groups.forEach(g => {
+      const tr = document.createElement("tr");
+      const names = customers.filter(c => c.price_group_id === g.id).map(c => c.name).join(", ") || "-";
+      tr.innerHTML = `<td>${g.name}</td><td>${names}</td>`;
+      table.appendChild(tr);
+    });
+    listArea.innerHTML = "";
+    listArea.appendChild(table);
+  } catch {
+    listArea.innerHTML = "<p class='empty'>목록을 불러오지 못했습니다.</p>";
+  }
+}
+
+async function renderCustomerSalesTab() {
+  document.getElementById("formTitle").textContent = "거래처별 판매내역 조회";
+  document.getElementById("listTitle").textContent = "판매내역";
+  const form = document.getElementById("entryForm");
+  form.style.flexDirection = "";
+  form.style.alignItems = "";
+  form.innerHTML = "";
+
+  const customers = await fetch(`${API_BASE}/customers`).then(r => r.json());
+
+  const custField = document.createElement("div");
+  custField.className = "field";
+  custField.innerHTML = "<label>거래처</label>";
+  const custSelect = document.createElement("select");
+  custSelect.style.width = "200px";
+  custSelect.innerHTML = customers.length
+    ? customers.map(c => `<option value="${c.id}">${c.name}</option>`).join("")
+    : `<option value="">등록된 거래처 없음</option>`;
+  custField.appendChild(custSelect);
+  form.appendChild(custField);
+
+  const btn = document.createElement("button");
+  btn.type = "button";
+  btn.className = "submit";
+  btn.textContent = "조회";
+  btn.onclick = () => loadCustomerSales(Number(custSelect.value), customers);
+  form.appendChild(btn);
+
+  if (customers.length) {
+    loadCustomerSales(Number(custSelect.value), customers);
+  } else {
+    document.getElementById("listArea").innerHTML = "<p class='empty'>등록된 거래처가 없습니다.</p>";
+  }
+}
+
+async function loadCustomerSales(customerId, customers) {
+  const listArea = document.getElementById("listArea");
+  listArea.innerHTML = "<p class='empty'>불러오는 중...</p>";
+  if (!customerId) { listArea.innerHTML = "<p class='empty'>거래처를 선택하세요.</p>"; return; }
+  try {
+    const rows = await fetch(`${API_BASE}/customers/${customerId}/sales-history`).then(r => r.json());
+    const cust = customers.find(c => c.id === customerId);
+    if (!rows.length) {
+      listArea.innerHTML = `<p class="empty">${cust ? cust.name : ""} 거래처의 판매 내역이 없습니다.</p>`;
+      return;
+    }
+    const totalQty = {};
+    let totalAmount = 0;
+    rows.forEach(r => {
+      totalQty[r.product_name] = (totalQty[r.product_name] || 0) + r.quantity;
+      totalAmount += r.line_amount;
+    });
+
+    const summary = document.createElement("p");
+    summary.style.cssText = "font-size:13px; color:var(--muted); margin:0 0 10px;";
+    summary.textContent = `${cust ? cust.name : ""} · 총 ${rows.length}건 · 판매액 합계 ${totalAmount.toLocaleString()}원`;
+
+    const table = document.createElement("table");
+    table.innerHTML = "<tr><th>날짜</th><th>주문번호</th><th>품목</th><th>단위</th><th>수량</th><th>단가</th><th>금액</th><th>상태</th></tr>";
+    rows.forEach(r => {
+      const tr = document.createElement("tr");
+      tr.innerHTML = `
+        <td>${r.order_date}</td>
+        <td>#${r.order_id}</td>
+        <td>${r.product_name}</td>
+        <td>${r.unit_type ?? "-"}</td>
+        <td>${r.quantity}</td>
+        <td>${r.unit_price.toLocaleString()}원</td>
+        <td>${r.line_amount.toLocaleString()}원</td>
+        <td>${r.status}</td>`;
+      table.appendChild(tr);
+    });
+    listArea.innerHTML = "";
+    listArea.appendChild(summary);
+    listArea.appendChild(table);
+  } catch {
+    listArea.innerHTML = "<p class='empty'>내역을 불러오지 못했습니다.</p>";
+  }
+}
+
+const CUSTOM_TABS = {
+  orders: renderOrderTab,
+  returns: renderReturnTab,
+  taxinvoices: renderInvoiceTab,
+  reports: renderReportTab,
+  pricelists: renderPriceListTab,
+  customersales: renderCustomerSalesTab,
+};
+
+document.querySelectorAll("#tabs button").forEach(btn => {
+  btn.addEventListener("click", () => {
+    document.querySelectorAll("#tabs button").forEach(b => b.classList.remove("active"));
+    btn.classList.add("active");
+    currentTab = btn.dataset.tab;
+    editingItem = null; // 탭을 옮기면 수정 상태는 초기화한다
+    if (CUSTOM_TABS[currentTab]) {
+      CUSTOM_TABS[currentTab]();
+    } else {
+      renderForm();
+      loadList();
+    }
+  });
+});
+
+checkApi();
+renderForm();
+loadList();
+</script>
+</body>
+</html>
